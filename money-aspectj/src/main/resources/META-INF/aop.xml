@@ -2,6 +2,7 @@
 
     <aspects>
         <aspect name="com.comcast.money.aspectj.TraceAspect" />
+        <aspect name="com.comcast.money.aspectj.FutureAspect" />
     </aspects>
 
     <weaver options="-XnoInline -verbose -showWeaveInfo">

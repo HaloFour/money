@@ -24,10 +24,10 @@ import org.mockito.Mockito._
 import org.scalatest._
 import org.scalatest.concurrent.Eventually
 import org.scalatest.mock.MockitoSugar
-import org.slf4j.MDC
 
-import scala.concurrent.{ Await, Future, Promise }
+import scala.concurrent.ExecutionContext.Implicits.global
 import scala.concurrent.duration._
+import scala.concurrent.{ Await, Future, Promise }
 import scala.util.{ Failure, Try }
 
 class TraceAspectSpec extends WordSpec
@@ -132,6 +132,17 @@ class TraceAspectSpec extends WordSpec
     ignoredExceptions = Array(classOf[IllegalArgumentException])
   )
   def asyncMethodWithIgnoredException(future: Future[String]): Future[String] = future
+
+  @Traced(
+    value = "asyncMethodFlatMap",
+    async = true
+  )
+  def asyncMethodFlatMap(first: Future[String], second: Future[String]): Future[String] = {
+    for {
+      firstResult <- asyncMethodReturnsFuture(first)
+      secondResult <- asyncMethodReturnsFuture(second)
+    } yield s"$firstResult $secondResult!"
+  }
 
   @Timed("methodWithTiming")
   def methodWithTiming() = {
@@ -336,7 +347,21 @@ class TraceAspectSpec extends WordSpec
         And("a span-success is logged with a value of false")
         expectLogMessageContaining("span-success=false")
       }
+      "logs nested child async spans via flat map (for comprehension)" in {
+        Given("a method that invokes child async methods")
 
+        When("the method is invoked")
+        val promise1 = Promise[String]()
+        val promise2 = Promise[String]()
+        val future = asyncMethodFlatMap(promise1.future, promise2.future)
+
+        promise1.success("hello")
+        promise2.success("world")
+        val result = Await.result(future, 500 millis)
+
+        LogRecord.log("log").foreach(System.out.println)
+        System.out.println(result)
+      }
     }
     "advising methods that have parameters with the TracedData annotation" should {
       "record the value of the parameter in the trace" in {
