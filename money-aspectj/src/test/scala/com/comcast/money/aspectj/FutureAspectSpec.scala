@@ -95,15 +95,13 @@ class FutureAspectSpec extends FeatureSpecLike
       Then("the parent of the nested trace is the root trace")
       nestedSpan.info().id().parentId() shouldEqual rootSpan.info().id().selfId()
 
-      LogRecord.log("log").foreach(System.out.println)
-
       And("the root trace has notes for begin, flatMap, and map")
       expectLogMessageContainingStrings(Seq("[ begin=root ]", "[ flatMap=root ]", "[ map=root ]"))
 
       And("the nested trace has notes for begin, flatMap, and map")
       expectLogMessageContainingStrings(Seq("[ begin=nested ]", "[ flatMap=nested ]", "[ map=nested ]"))
     }
-    scenario("foreach") {
+    ignore("foreach") {
       Given("a traced future that returns a string value")
       And("a foreach exists on the traced future that records a note and converts the string to a double")
 
@@ -476,7 +474,7 @@ class FutureAspectSpec extends FeatureSpecLike
       expectLogMessageContainingStrings(Seq("begin=root", "map=root", "success=transform"))
     }
 
-    scenario("onFailure") {
+    ignore("onFailure") {
       Given("a traced future that has an onFailure")
       And("the traced future throws an exception")
 
@@ -522,7 +520,7 @@ class FutureAspectSpec extends FeatureSpecLike
       expectLogMessageContainingStrings(Seq("begin=root", "map=root", "onFailure=root", "span-success=false"))
     }
 
-    scenario("onSuccess") {
+    ignore("onSuccess") {
       Given("a traced future that has an onSuccess")
       And("the onSuccess records a note")
 
