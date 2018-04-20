@@ -14,14 +14,14 @@
  * limitations under the License.
  */
 
-package com.comcast.money.core.concurrent
+package com.comcast.money.aspectj
 
 import com.comcast.money.annotations.Traced
-import com.comcast.money.api.Span
 import com.comcast.money.core.internal.SpanLocal
-import com.comcast.money.core.{ LogRecord, SpecHelpers, Tracers }
+import com.comcast.money.core.{ LogRecord, SpecHelpers }
 import org.scalatest._
 import com.comcast.money.core.Money.Environment.tracer
+import com.comcast.money.core.concurrent.ConcurrentSupport
 import org.scalatest.mock.MockitoSugar
 
 import scala.concurrent.{ Await, Future }
@@ -101,7 +101,7 @@ class FutureAspectSpec extends FeatureSpecLike
       And("the nested trace has notes for begin, flatMap, and map")
       expectLogMessageContainingStrings(Seq("[ begin=nested ]", "[ flatMap=nested ]", "[ map=nested ]"))
     }
-    ignore("foreach") {
+    scenario("foreach") {
       Given("a traced future that returns a string value")
       And("a foreach exists on the traced future that records a note and converts the string to a double")
 
@@ -474,7 +474,7 @@ class FutureAspectSpec extends FeatureSpecLike
       expectLogMessageContainingStrings(Seq("begin=root", "map=root", "success=transform"))
     }
 
-    ignore("onFailure") {
+    scenario("onFailure") {
       Given("a traced future that has an onFailure")
       And("the traced future throws an exception")
 
@@ -520,7 +520,7 @@ class FutureAspectSpec extends FeatureSpecLike
       expectLogMessageContainingStrings(Seq("begin=root", "map=root", "onFailure=root", "span-success=false"))
     }
 
-    ignore("onSuccess") {
+    scenario("onSuccess") {
       Given("a traced future that has an onSuccess")
       And("the onSuccess records a note")
 

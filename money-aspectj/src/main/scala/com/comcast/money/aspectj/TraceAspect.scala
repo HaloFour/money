@@ -18,7 +18,7 @@ package com.comcast.money.aspectj
 
 import com.comcast.money.annotations.{ Timed, Traced }
 import com.comcast.money.core._
-import com.comcast.money.core.async.AsyncNotifier
+import com.comcast.money.core.async.{ AsyncNotifier, AsyncSpan }
 import com.comcast.money.core.internal.{ MDCSupport, SpanLocal }
 import com.comcast.money.core.logging.TraceLogging
 import com.comcast.money.core.reflect.Reflections
@@ -52,6 +52,12 @@ class TraceAspect extends Reflections with TraceLogging {
       tracer.startSpan(key)
       mdcSupport.setSpanNameMDC(Some(key))
       traceMethodArguments(joinPoint)
+
+      if (traceAnnotation.async()) {
+        SpanLocal.pop()
+          .map(s => new AsyncSpan(s))
+          .foreach(SpanLocal.push)
+      }
 
       val returnValue = joinPoint.proceed()
 
