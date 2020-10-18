@@ -17,6 +17,10 @@
 package com.comcast.money.core
 
 import com.comcast.money.api.SpanId
+import io.grpc.Context
+import io.opentelemetry.common.{ AttributeKey, Attributes }
+import io.opentelemetry.trace.propagation.HttpTraceContext
+import io.opentelemetry.trace.{ EndSpanOptions, Span, SpanContext, StatusCanonicalCode, TraceFlags, TraceState, TracingContextUtils }
 
 import scala.util.{ Failure, Success, Try }
 
@@ -26,7 +30,9 @@ object Formatters {
   private[core] val B3TraceIdHeader = "X-B3-TraceId"
   private[core] val B3SpanIdHeader = "X-B3-SpanId"
   private[core] val B3ParentSpanIdHeader = "X-B3-ParentSpanId"
+  private[core] val B3SampledHeader = "X-B3-Sampled"
   private[core] val TraceParentHeader = "traceparent"
+  private[core] val TraceStateHeader = "tracestate"
 
   private[core] val TraceParentPattern = """^(\d\d)-([0-9a-f]{32})-([0-9a-f]{16})-(\d\d)$""".r
 
@@ -87,19 +93,29 @@ object Formatters {
 
   private[core] def fromB3HttpHeaders(getHeader: String => String, log: String => Unit = _ => {}): Option[SpanId] = {
 
-    def spanIdFromB3Headers(traceId: String, maybeParentSpanId: Option[String], maybeSpanId: Option[String]): Try[SpanId] = Try {
+    def spanIdFromB3Headers(
+      traceId: String,
+      maybeParentSpanId: Option[String],
+      maybeSpanId: Option[String],
+      maybeSampled: Option[String]): Try[SpanId] = Try {
+
+      val traceFlags = maybeSampled.map {
+        case "0" => TraceFlags.getDefault
+      } getOrElse TraceFlags.getSampled
+
       (maybeParentSpanId, maybeSpanId) match {
-        case (Some(ps), Some(s)) => SpanId.fromRemote(traceId.toGuid, ps.fromHexStringToLong, s.fromHexStringToLong)
-        case (Some(ps), _) => SpanId.fromRemote(traceId.toGuid, ps.fromHexStringToLong)
-        case (_, Some(s)) => SpanId.fromRemote(traceId.toGuid, s.fromHexStringToLong, s.fromHexStringToLong) // root span
-        case _ => SpanId.fromRemote(traceId.toGuid)
+        case (Some(ps), Some(s)) => SpanId.fromRemote(traceId.toGuid, ps.fromHexStringToLong, s.fromHexStringToLong, traceFlags, TraceState.getDefault)
+        case (Some(ps), _) => SpanId.fromRemote(traceId.toGuid, ps.fromHexStringToLong, traceFlags, TraceState.getDefault)
+        case (_, Some(s)) => SpanId.fromRemote(traceId.toGuid, s.fromHexStringToLong, s.fromHexStringToLong, traceFlags, TraceState.getDefault) // root span
+        case _ => SpanId.fromRemote(traceId.toGuid, traceFlags, TraceState.getDefault)
       }
     }
 
     def parseHeaders(traceIdVal: String): Option[SpanId] = {
       val maybeB3ParentSpanId = Option(getHeader(B3ParentSpanIdHeader))
       val maybeB3SpanId = Option(getHeader(B3SpanIdHeader))
-      spanIdFromB3Headers(traceIdVal, maybeB3ParentSpanId, maybeB3SpanId) match {
+      val maybeB3Sampled = Option(getHeader(B3SampledHeader))
+      spanIdFromB3Headers(traceIdVal, maybeB3ParentSpanId, maybeB3SpanId, maybeB3Sampled) match {
         case Success(spanId) => Some(spanId)
         case Failure(ex) =>
           log(
@@ -126,40 +142,49 @@ object Formatters {
     // No X-b3 parent if this is a root span
     if (spanId.parentId != spanId.selfId) addHeader(B3ParentSpanIdHeader, spanId.parentIdAsHex)
     addHeader(B3SpanIdHeader, spanId.selfIdAsHex)
+    addHeader(B3SampledHeader, if (spanId.isSampled) "1" else "0")
   }
 
   private[core] def fromTraceParentHeader(getHeader: String => String, log: String => Unit = _ => {}): Option[SpanId] = {
 
-    def spanIdFromHeader(traceId: String, parentSpanId: String): Try[SpanId] = Try {
-      val parentSpanIdAsLong = parentSpanId.fromHexStringToLong
-      SpanId.fromRemote(traceId.toGuid, parentSpanIdAsLong, parentSpanIdAsLong)
+    val httpTraceContext = HttpTraceContext.getInstance
+    val context = httpTraceContext.extract[Unit](Context.ROOT, (), (_, key) => getHeader(key))
+    Option(TracingContextUtils.getSpanWithoutDefault(context)).map {
+      span => SpanId.fromSpanContext(span.getContext)
     }
-
-    def parseHeader(traceParentHeader: String): Option[SpanId] = {
-      traceParentHeader match {
-        case TraceParentPattern(_, traceId, parentSpanId, _) => spanIdFromHeader(traceId, parentSpanId) match {
-          case Success(value) => Some(value)
-          case Failure(ex) =>
-            log(
-              s"Unable to parse Trace-Context trace for request headers: " +
-                s"$TraceParentHeader:'$traceParentHeader' " +
-                s"${ex.getMessage}")
-            None
-        }
-        case _ => None
-      }
-    }
-
-    Option(getHeader(TraceParentHeader)).flatMap(parseHeader)
   }
 
   private[core] def toTraceParentHeader(spanId: SpanId, addHeader: (String, String) => Unit): Unit = {
-    val sampled = if (spanId.isSampled) "01" else "00"
-    addHeader(TraceParentHeader, TraceParentHeaderFormat.format(spanId.traceIdAsHex, spanId.selfIdAsHex, sampled))
+    val httpTraceContext = HttpTraceContext.getInstance
+    val span = new PropagationSpan(spanId)
+    val context = TracingContextUtils.withSpan(span, Context.ROOT)
+    httpTraceContext.inject[Unit](context, (), (_, key, value) => addHeader(key, value))
   }
 
   def setResponseHeaders(getHeader: String => String, addHeader: (String, String) => Unit): Unit = {
     def setResponseHeader(headerName: String): Unit = Option(getHeader(headerName)).foreach(v => addHeader(headerName, v))
     Seq(MoneyTraceHeader, B3TraceIdHeader, B3ParentSpanIdHeader, B3SpanIdHeader, TraceParentHeader).foreach(setResponseHeader)
+  }
+
+  private class PropagationSpan(spanId: SpanId) extends Span {
+    override def getContext: SpanContext = spanId.toSpanContext
+
+    override def setAttribute(key: String, value: String): Unit = ()
+    override def setAttribute(key: String, value: Long): Unit = ()
+    override def setAttribute(key: String, value: Double): Unit = ()
+    override def setAttribute(key: String, value: Boolean): Unit = ()
+    override def setAttribute[T](key: AttributeKey[T], value: T): Unit = ()
+    override def addEvent(name: String): Unit = ()
+    override def addEvent(name: String, timestamp: Long): Unit = ()
+    override def addEvent(name: String, attributes: Attributes): Unit = ()
+    override def addEvent(name: String, attributes: Attributes, timestamp: Long): Unit = ()
+    override def setStatus(canonicalCode: StatusCanonicalCode): Unit = ()
+    override def setStatus(canonicalCode: StatusCanonicalCode, description: String): Unit = ()
+    override def recordException(exception: Throwable): Unit = ()
+    override def recordException(exception: Throwable, additionalAttributes: Attributes): Unit = ()
+    override def updateName(name: String): Unit = ()
+    override def `end`(): Unit = ()
+    override def `end`(endOptions: EndSpanOptions): Unit = ()
+    override def isRecording: Boolean = false
   }
 }

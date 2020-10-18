@@ -66,7 +66,7 @@ class KafkaSpanHandlerSpec extends AnyWordSpec
 
     val testProducer = underTest.mockProducer
     val sampleData = TestSpanInfo(
-      id = new api.SpanId("foo", 1L),
+      id = new api.SpanId("foo", 1L, 1L),
       name = "key",
       appName = "app",
       host = "host",

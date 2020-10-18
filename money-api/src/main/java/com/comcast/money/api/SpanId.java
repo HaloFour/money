@@ -30,32 +30,41 @@ import io.opentelemetry.trace.TraceState;
 /**
  * A unique identifier for a Span.
  */
-public class SpanId {
+public final class SpanId {
 
     private static final Random rand = new Random();
     private static final String STRING_FORMAT = "SpanId~%s~%s~%s";
     private static final String INVALID_TRACE_ID = "00000000-0000-0000-0000-000000000000";
-    private static final SpanId INVALID_SPAN_ID = new SpanId(INVALID_TRACE_ID, 0, 0, false, TraceFlags.getDefault(), TraceState.getDefault());
+    private static final SpanId INVALID_SPAN_ID = new SpanId(INVALID_TRACE_ID, 0, 0, false, false, TraceState.getDefault());
     private static final Pattern TRACE_ID_PATTERN = Pattern.compile("^([0-9a-f]{8})-([0-9a-f]{4})-([0-9a-f]{4})-([0-9a-f]{4})-([0-9a-f]{12})$", Pattern.CASE_INSENSITIVE);
+    private static final byte SAMPLED = TraceFlags.getSampled();
 
     private final String traceId;
     private final long parentId;
     private final long selfId;
+    private final boolean sampled;
     private final boolean remote;
-    private final byte traceFlags;
     private final TraceState traceState;
 
     /**
      * Creates a new root span ID with a random trace ID and span ID.
      */
     public SpanId() {
-        this(UUID.randomUUID().toString());
+        this(UUID.randomUUID().toString(), true);
+    }
+
+    public SpanId(boolean sampled) {
+        this(UUID.randomUUID().toString(), sampled);
     }
 
     /**
      * Creates a new root span ID with the specified trace ID and random span ID.
      */
     public SpanId(String traceId) {
+        this(traceId, true);
+    }
+
+    public SpanId(String traceId, boolean sampled) {
 
         if (traceId == null) {
             this.traceId = UUID.randomUUID().toString();
@@ -65,25 +74,25 @@ public class SpanId {
         this.parentId = rand.nextLong();
         this.selfId = this.parentId;
         this.remote = false;
-        this.traceFlags = TraceFlags.getSampled();
+        this.sampled = sampled;
         this.traceState = TraceState.getDefault();
-    }
-
-    /**
-     * Creates a new child span ID with the specified trace ID and parent span ID and random span ID.
-     */
-    public SpanId(String traceId, long parentId) {
-        this(traceId, parentId, rand.nextLong());
     }
 
     /**
      * Creates a span ID with the specified trace ID, parent span ID and span ID.
      */
     public SpanId(String traceId, long parentId, long selfId) {
-        this(traceId, parentId, selfId, false, TraceFlags.getSampled(), TraceState.getDefault());
+        this(traceId, parentId, selfId, true);
     }
 
-    private SpanId(String traceId, long parentId, long selfId, boolean remote, byte traceFlags, TraceState traceState) {
+    /**
+     * Creates a span ID with the specified trace ID, parent span ID and span ID.
+     */
+    public SpanId(String traceId, long parentId, long selfId, boolean sampled) {
+        this(traceId, parentId, selfId, sampled, false, TraceState.getDefault());
+    }
+
+    private SpanId(String traceId, long parentId, long selfId, boolean sampled, boolean remote, TraceState traceState) {
 
         if (traceId == null) {
             this.traceId = UUID.randomUUID().toString();
@@ -92,8 +101,8 @@ public class SpanId {
         }
         this.parentId = parentId;
         this.selfId = selfId;
+        this.sampled = sampled;
         this.remote = remote;
-        this.traceFlags = traceFlags;
         this.traceState = traceState;
     }
 
@@ -148,8 +157,8 @@ public class SpanId {
         return new SpanId(this.traceId,
                 this.selfId,
                 rand.nextLong(),
+                this.sampled,
                 false,
-                this.traceFlags,
                 this.traceState);
     }
 
@@ -179,8 +188,7 @@ public class SpanId {
      * @return {@code true} if the span is sampled
      */
     public boolean isSampled() {
-        byte isSampled = TraceFlags.getSampled();
-        return (traceFlags & isSampled) == isSampled;
+        return sampled;
     }
 
     @Override
@@ -192,6 +200,7 @@ public class SpanId {
      * @return the span ID as an OpenTelemetry {@link SpanContext}
      */
     public SpanContext toSpanContext() {
+        byte traceFlags = sampled ? TraceFlags.getSampled() : TraceFlags.getDefault();
         return toSpanContext(traceFlags, traceState);
     }
 
@@ -233,9 +242,11 @@ public class SpanId {
             String traceId = new UUID(traceIdHi, traceIdLo).toString();
             buffer = ByteBuffer.wrap(spanContext.getSpanIdBytes());
             long spanId = buffer.getLong();
+            byte traceFlags = spanContext.getTraceFlags();
+            boolean sampled = (traceFlags & SAMPLED) == SAMPLED;
             return new SpanId(traceId, spanId, spanId,
                     spanContext.isRemote(),
-                    spanContext.getTraceFlags(),
+                    sampled,
                     spanContext.getTraceState());
         } else {
             return INVALID_SPAN_ID;
@@ -255,7 +266,7 @@ public class SpanId {
      */
     public static SpanId fromRemote(String traceId, byte traceFlags, TraceState traceState) {
         long spanId = rand.nextLong();
-        return new SpanId(traceId, spanId, spanId, true, traceFlags, traceState);
+        return fromRemote(traceId, spanId, spanId, traceFlags, traceState);
     }
 
     /**
@@ -269,7 +280,7 @@ public class SpanId {
      * Creates a span ID that was propagated from a remote parent.
      */
     public static SpanId fromRemote(String traceId, long parentId, byte traceFlags, TraceState traceState) {
-        return new SpanId(traceId, parentId, rand.nextLong(), true, traceFlags, traceState);
+        return fromRemote(traceId, parentId, rand.nextLong(), traceFlags, traceState);
     }
 
     /**
@@ -283,7 +294,8 @@ public class SpanId {
      * Creates a span ID that was propagated from a remote parent.
      */
     public static SpanId fromRemote(String traceId, long parentId, long spanId, byte traceFlags, TraceState traceState) {
-        return new SpanId(traceId, parentId, spanId, true, traceFlags, traceState);
+        boolean sampled = (traceFlags & SAMPLED) == SAMPLED;
+        return new SpanId(traceId, parentId, spanId, sampled, true, traceState);
     }
 
     /**

@@ -37,14 +37,6 @@ class SpanIdSpec extends AnyWordSpec with Matchers {
       spanId.isSampled shouldBe true
     }
 
-    "set self id to a random long if not specified in the constructor" in {
-      val spanId = new SpanId("foo", 1L)
-
-      spanId.traceId shouldBe "foo"
-      spanId.parentId shouldBe 1L
-      Long.box(spanId.selfId) should not be null
-    }
-
     "set the self and parent id to a random long if not specified" in {
       val spanId = new SpanId("foo")
 
@@ -79,7 +71,7 @@ class SpanIdSpec extends AnyWordSpec with Matchers {
     }
 
     "default traceId to UUID if set to null" in {
-      val spanId = new SpanId(null, 1L)
+      val spanId = new SpanId(null, 1L, 1L)
 
       spanId.traceId should not be null
     }

@@ -70,6 +70,7 @@ class FormattersSpec extends AnyWordSpec with Matchers with ScalaCheckDrivenProp
             case B3TraceIdHeader => traceIdValue.toString.fromGuid
             case B3ParentSpanIdHeader => parentSpanIdValue.toHexString
             case B3SpanIdHeader => spanIdValue.toHexString
+            case B3SampledHeader => null
           })
         spanId shouldBe Some(expectedSpanId)
         val maybeRootSpanId = fromB3HttpHeaders(
@@ -93,6 +94,7 @@ class FormattersSpec extends AnyWordSpec with Matchers with ScalaCheckDrivenProp
             case B3TraceIdHeader => traceIdValue
             case B3ParentSpanIdHeader => parentSpanIdValue
             case B3SpanIdHeader => spanIdValue
+            case B3SampledHeader => null
           })
         spanId shouldBe None
       }
@@ -107,31 +109,34 @@ class FormattersSpec extends AnyWordSpec with Matchers with ScalaCheckDrivenProp
           case B3ParentSpanIdHeader if expectedSpanId.isRoot => Failed
           case B3ParentSpanIdHeader => v shouldBe f"${parentSpanIdValue}%016x"
           case B3SpanIdHeader => v shouldBe f"${spanIdValue}%016x"
+          case B3SampledHeader => v shouldBe "1"
         })
       }
     }
 
     "read a traceparent http header" in {
       forAll { (traceIdValue: UUID, spanIdValue: Long) =>
-        val expectedSpanId = new SpanId(traceIdValue.toString, spanIdValue, spanIdValue)
-        val spanId = fromTraceParentHeader(
-          getHeader = {
-            case TraceParentHeader => f"00-${traceIdValue.toString.fromGuid}%s-${spanIdValue}%016x-00"
-          })
-        spanId should not be None
-        spanId.get.traceId shouldBe traceIdValue.toString
-        spanId.get.selfId shouldBe spanIdValue
+        whenever(validIds(traceIdValue, spanIdValue)) {
+          val spanId = fromTraceParentHeader(
+            getHeader = {
+              case TraceParentHeader => f"00-${traceIdValue.toString.fromGuid}%s-${spanIdValue}%016x-01"
+              case TraceStateHeader => null
+            })
+          spanId should not be None
+          spanId.get.traceId shouldBe traceIdValue.toString
+          spanId.get.selfId shouldBe spanIdValue
+          spanId.get.isRemote shouldBe true
+          spanId.get.isSampled shouldBe true
+        }
       }
     }
 
     "fail to read traceparent headers correctly for invalid headers" in {
-      forAll { (traceIdValue: String, parentSpanIdValue: String, spanIdValue: String) =>
-        val spanId = fromTraceParentHeader(
-          getHeader = {
-            case TraceParentHeader => "garbage"
-          })
-        spanId shouldBe None
-      }
+      val spanId = fromTraceParentHeader(
+        getHeader = {
+          case TraceParentHeader => "garbage"
+        })
+      spanId shouldBe None
     }
 
     "create traceparent headers correctly given any valid character UUID for trace-Id and any valid long integers for parent and span ID" in {
@@ -163,5 +168,8 @@ class FormattersSpec extends AnyWordSpec with Matchers with ScalaCheckDrivenProp
         }
       }
     }
+
+    def validIds(traceIdValue: UUID, spanId: Long): Boolean =
+      (traceIdValue.getLeastSignificantBits != 0 || traceIdValue.getMostSignificantBits != 0) && spanId != 0L
   }
 }
