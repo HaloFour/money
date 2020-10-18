@@ -138,7 +138,7 @@ class FormattersSpec extends AnyWordSpec with Matchers with ScalaCheckDrivenProp
       forAll { (traceIdValue: UUID, spanIdValue: Long) =>
         val expectedSpanId = new SpanId(traceIdValue.toString, spanIdValue, spanIdValue)
         Formatters.toTraceParentHeader(expectedSpanId, (k, v) => k match {
-          case TraceParentHeader => v shouldBe f"00-${traceIdValue.toString.fromGuid}%s-${spanIdValue}%016x-00"
+          case TraceParentHeader => v shouldBe f"00-${traceIdValue.toString.fromGuid}%s-${spanIdValue}%016x-01"
         })
       }
     }

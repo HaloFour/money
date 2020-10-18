@@ -20,7 +20,11 @@ import io.opentelemetry.trace.{ SpanContext, TraceFlags, TraceState }
 import org.scalatest.wordspec.AnyWordSpec
 import org.scalatest.matchers.should.Matchers
 
+import scala.util.Random
+
 class SpanIdSpec extends AnyWordSpec with Matchers {
+
+  val rand = new Random
 
   "SpanId" should {
     "take 3 constructor arguments" in {
@@ -29,6 +33,8 @@ class SpanIdSpec extends AnyWordSpec with Matchers {
       spanId.traceId shouldBe "foo"
       spanId.parentId shouldBe 1L
       spanId.selfId shouldBe 2L
+      spanId.isRemote shouldBe false
+      spanId.isSampled shouldBe true
     }
 
     "set self id to a random long if not specified in the constructor" in {
@@ -123,7 +129,7 @@ class SpanIdSpec extends AnyWordSpec with Matchers {
 
       spanContext.getTraceIdAsHexString shouldBe "01234567890abcdef01234567890abcd"
       spanContext.getSpanIdAsHexString shouldBe "0123456789abcdef"
-      spanContext.getTraceFlags shouldBe TraceFlags.getDefault
+      spanContext.getTraceFlags shouldBe TraceFlags.getSampled
       spanContext.getTraceState shouldBe TraceState.getDefault
     }
 
@@ -131,9 +137,70 @@ class SpanIdSpec extends AnyWordSpec with Matchers {
       val spanContext = SpanContext.create("01234567890abcdef01234567890abcd", "0123456789abcdef", TraceFlags.getDefault, TraceState.getDefault)
       val spanId = SpanId.fromSpanContext(spanContext)
 
-      spanId.traceId() shouldBe "01234567-890a-bcde-f012-34567890abcd"
-      spanId.selfId() shouldBe 81985529216486895L
-      spanId.parentId() shouldBe 81985529216486895L
+      spanId.traceId shouldBe "01234567-890a-bcde-f012-34567890abcd"
+      spanId.selfId shouldBe 81985529216486895L
+      spanId.parentId shouldBe 81985529216486895L
+      spanId.isSampled shouldBe false
+    }
+
+    "generate a remote span from trace ID" in {
+      val spanId = SpanId.fromRemote("foo")
+
+      spanId.traceId shouldBe "foo"
+      spanId.isRemote shouldBe true
+      spanId.isSampled shouldBe true
+    }
+
+    "generate a remote span from trace ID, sampled and state" in {
+      val spanId = SpanId.fromRemote("foo", TraceFlags.getDefault, TraceState.getDefault)
+
+      spanId.traceId shouldBe "foo"
+      spanId.isRemote shouldBe true
+      spanId.isSampled shouldBe false
+    }
+
+    "generate a remote span from trace ID and parent ID" in {
+      val parentId = rand.nextLong()
+      val spanId = SpanId.fromRemote("foo", parentId)
+
+      spanId.traceId shouldBe "foo"
+      spanId.parentId shouldBe parentId
+      spanId.isRemote shouldBe true
+      spanId.isSampled shouldBe true
+    }
+
+    "generate a remote span from trace ID, parent ID, sampled and state" in {
+      val parentId = rand.nextLong()
+      val spanId = SpanId.fromRemote("foo", parentId, TraceFlags.getDefault, TraceState.getDefault)
+
+      spanId.traceId shouldBe "foo"
+      spanId.parentId shouldBe parentId
+      spanId.isRemote shouldBe true
+      spanId.isSampled shouldBe false
+    }
+
+    "generate a remote span from trace ID, parent ID and spanID" in {
+      val parentId = rand.nextLong()
+      val selfId = rand.nextLong()
+      val spanId = SpanId.fromRemote("foo", parentId, selfId)
+
+      spanId.traceId shouldBe "foo"
+      spanId.selfId shouldBe selfId
+      spanId.parentId shouldBe parentId
+      spanId.isRemote shouldBe true
+      spanId.isSampled shouldBe true
+    }
+
+    "generate a remote span from trace ID, parent ID, spanID, sampled and state" in {
+      val parentId = rand.nextLong()
+      val selfId = rand.nextLong()
+      val spanId = SpanId.fromRemote("foo", parentId, selfId, TraceFlags.getDefault, TraceState.getDefault)
+
+      spanId.traceId shouldBe "foo"
+      spanId.parentId shouldBe parentId
+      spanId.selfId shouldBe selfId
+      spanId.isRemote shouldBe true
+      spanId.isSampled shouldBe false
     }
   }
 }

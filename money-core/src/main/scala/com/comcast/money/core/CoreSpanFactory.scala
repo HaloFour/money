@@ -40,7 +40,7 @@ private[core] class CoreSpanFactory(clock: Clock, handler: SpanHandler) extends 
    */
   override def newSpanFromHeader(childName: String, getHeader: function.Function[String, String]): Span =
     Formatters.fromHttpHeaders(getHeader.apply, logger.warn) match {
-      case Some(spanId) => newSpan(new SpanId(spanId.traceId, spanId.parentId), childName)
+      case Some(spanId) => newSpan(spanId.newChildId, childName)
       case None =>
         logger.warn(s"creating root span because http header '${getHeader}' was malformed")
         newSpan(childName)

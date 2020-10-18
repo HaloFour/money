@@ -46,7 +46,7 @@ object Formatters {
   }
 
   private[core] val MoneyHeaderFormat = "trace-id=%s;parent-id=%s;span-id=%s"
-  private[core] val TraceParentHeaderFormat = "00-%s-%s-00"
+  private[core] val TraceParentHeaderFormat = "00-%s-%s-%s"
 
   def fromHttpHeaders(getHeader: String => String, log: String => Unit = _ => {}): Option[SpanId] =
     fromMoneyHeader(getHeader, log)
@@ -67,13 +67,13 @@ object Formatters {
       val parentId = parts(1).split('=')(1)
       val selfId = parts(2).split('=')(1)
 
-      new SpanId(traceId, parentId.toLong, selfId.toLong)
+      SpanId.fromRemote(traceId, parentId.toLong, selfId.toLong)
     }
 
     def parseHeader(headerValue: String): Option[SpanId] =
       spanIdfromMoneyHeader(headerValue) match {
         case Success(spanId) => Some(spanId)
-        case Failure(ex) =>
+        case Failure(_) =>
           log(s"Unable to parse money trace for request header $headerValue")
           None
       }
@@ -89,10 +89,10 @@ object Formatters {
 
     def spanIdFromB3Headers(traceId: String, maybeParentSpanId: Option[String], maybeSpanId: Option[String]): Try[SpanId] = Try {
       (maybeParentSpanId, maybeSpanId) match {
-        case (Some(ps), Some(s)) => new SpanId(traceId.toGuid, ps.fromHexStringToLong, s.fromHexStringToLong)
-        case (Some(ps), _) => new SpanId(traceId.toGuid, ps.fromHexStringToLong)
-        case (_, Some(s)) => new SpanId(traceId.toGuid, s.fromHexStringToLong, s.fromHexStringToLong) // root span
-        case _ => new SpanId(traceId.toGuid)
+        case (Some(ps), Some(s)) => SpanId.fromRemote(traceId.toGuid, ps.fromHexStringToLong, s.fromHexStringToLong)
+        case (Some(ps), _) => SpanId.fromRemote(traceId.toGuid, ps.fromHexStringToLong)
+        case (_, Some(s)) => SpanId.fromRemote(traceId.toGuid, s.fromHexStringToLong, s.fromHexStringToLong) // root span
+        case _ => SpanId.fromRemote(traceId.toGuid)
       }
     }
 
@@ -132,7 +132,7 @@ object Formatters {
 
     def spanIdFromHeader(traceId: String, parentSpanId: String): Try[SpanId] = Try {
       val parentSpanIdAsLong = parentSpanId.fromHexStringToLong
-      new SpanId(traceId.toGuid, parentSpanIdAsLong, parentSpanIdAsLong)
+      SpanId.fromRemote(traceId.toGuid, parentSpanIdAsLong, parentSpanIdAsLong)
     }
 
     def parseHeader(traceParentHeader: String): Option[SpanId] = {
@@ -153,8 +153,10 @@ object Formatters {
     Option(getHeader(TraceParentHeader)).flatMap(parseHeader)
   }
 
-  private[core] def toTraceParentHeader(spanId: SpanId, addHeader: (String, String) => Unit): Unit =
-    addHeader(TraceParentHeader, TraceParentHeaderFormat.format(spanId.traceIdAsHex, spanId.selfIdAsHex))
+  private[core] def toTraceParentHeader(spanId: SpanId, addHeader: (String, String) => Unit): Unit = {
+    val sampled = if (spanId.isSampled) "01" else "00"
+    addHeader(TraceParentHeader, TraceParentHeaderFormat.format(spanId.traceIdAsHex, spanId.selfIdAsHex, sampled))
+  }
 
   def setResponseHeaders(getHeader: String => String, addHeader: (String, String) => Unit): Unit = {
     def setResponseHeader(headerName: String): Unit = Option(getHeader(headerName)).foreach(v => addHeader(headerName, v))

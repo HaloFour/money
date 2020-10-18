@@ -87,7 +87,7 @@ public class MoneyClientHttpInterceptorSpec {
         String expectedB3TraceIdHeaderVal = traceId.replace("-", "");
         String expectedB3SpanIdHeaderVal = String.format("%016x", spanId);
         String expectedB3ParentSpanIdHeaderVal = String.format("%016x", parentSpanId);
-        String expectedTraceParentHeaderVal = String.format("00-%s-%016x-00", traceId.replace("-", ""), spanId);
+        String expectedTraceParentHeaderVal = String.format("00-%s-%016x-01", traceId.replace("-", ""), spanId);
 
         underTest.intercept(httpRequest, new byte[0], clientHttpRequestExecution);
 

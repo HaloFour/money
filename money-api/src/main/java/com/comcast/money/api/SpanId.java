@@ -35,12 +35,15 @@ public class SpanId {
     private static final Random rand = new Random();
     private static final String STRING_FORMAT = "SpanId~%s~%s~%s";
     private static final String INVALID_TRACE_ID = "00000000-0000-0000-0000-000000000000";
-    private static final SpanId INVALID_SPAN_ID = new SpanId(INVALID_TRACE_ID, 0, 0);
+    private static final SpanId INVALID_SPAN_ID = new SpanId(INVALID_TRACE_ID, 0, 0, false, TraceFlags.getDefault(), TraceState.getDefault());
     private static final Pattern TRACE_ID_PATTERN = Pattern.compile("^([0-9a-f]{8})-([0-9a-f]{4})-([0-9a-f]{4})-([0-9a-f]{4})-([0-9a-f]{12})$", Pattern.CASE_INSENSITIVE);
 
     private final String traceId;
     private final long parentId;
     private final long selfId;
+    private final boolean remote;
+    private final byte traceFlags;
+    private final TraceState traceState;
 
     /**
      * Creates a new root span ID with a random trace ID and span ID.
@@ -61,6 +64,9 @@ public class SpanId {
         }
         this.parentId = rand.nextLong();
         this.selfId = this.parentId;
+        this.remote = false;
+        this.traceFlags = TraceFlags.getSampled();
+        this.traceState = TraceState.getDefault();
     }
 
     /**
@@ -74,6 +80,10 @@ public class SpanId {
      * Creates a span ID with the specified trace ID, parent span ID and span ID.
      */
     public SpanId(String traceId, long parentId, long selfId) {
+        this(traceId, parentId, selfId, false, TraceFlags.getSampled(), TraceState.getDefault());
+    }
+
+    private SpanId(String traceId, long parentId, long selfId, boolean remote, byte traceFlags, TraceState traceState) {
 
         if (traceId == null) {
             this.traceId = UUID.randomUUID().toString();
@@ -82,6 +92,9 @@ public class SpanId {
         }
         this.parentId = parentId;
         this.selfId = selfId;
+        this.remote = remote;
+        this.traceFlags = traceFlags;
+        this.traceState = traceState;
     }
 
     /**
@@ -107,6 +120,9 @@ public class SpanId {
         return parentId;
     }
 
+    /**
+     * @return the parent span ID as 16 hex characters, which will be all 00s in the case of a root span
+     */
     public String parentIdAsHex() {
         return io.opentelemetry.trace.SpanId.fromLong(parentId);
     }
@@ -118,6 +134,9 @@ public class SpanId {
         return selfId;
     }
 
+    /**
+     * @return the span ID as 16 hex characters
+     */
     public String selfIdAsHex() {
         return io.opentelemetry.trace.SpanId.fromLong(selfId);
     }
@@ -126,7 +145,12 @@ public class SpanId {
      * Creates a new child span ID from the current span ID.
      */
     public SpanId newChildId() {
-        return new SpanId(traceId, selfId);
+        return new SpanId(this.traceId,
+                this.selfId,
+                rand.nextLong(),
+                false,
+                this.traceFlags,
+                this.traceState);
     }
 
     /**
@@ -144,6 +168,21 @@ public class SpanId {
                 && !INVALID_TRACE_ID.equals(traceId);
     }
 
+    /**
+     * @return {@code true} if the span was propagated from a remote parent
+     */
+    public boolean isRemote() {
+        return remote;
+    }
+
+    /**
+     * @return {@code true} if the span is sampled
+     */
+    public boolean isSampled() {
+        byte isSampled = TraceFlags.getSampled();
+        return (traceFlags & isSampled) == isSampled;
+    }
+
     @Override
     public String toString() {
         return String.format(STRING_FORMAT, traceId, parentId, selfId);
@@ -153,14 +192,18 @@ public class SpanId {
      * @return the span ID as an OpenTelemetry {@link SpanContext}
      */
     public SpanContext toSpanContext() {
-        return toSpanContext(TraceFlags.getDefault(), TraceState.getDefault());
+        return toSpanContext(traceFlags, traceState);
     }
 
     /**
      * @return the span ID as an OpenTelemetry {@link SpanContext} with the specified trace flags and trace state.
      */
     public SpanContext toSpanContext(byte traceFlags, TraceState traceState) {
-        return SpanContext.create(traceIdAsHex(), selfIdAsHex(), traceFlags, traceState);
+        if (remote) {
+            return SpanContext.createFromRemoteParent(traceIdAsHex(), selfIdAsHex(), traceFlags, traceState);
+        } else {
+            return SpanContext.create(traceIdAsHex(), selfIdAsHex(), traceFlags, traceState);
+        }
     }
 
     /**
@@ -190,10 +233,57 @@ public class SpanId {
             String traceId = new UUID(traceIdHi, traceIdLo).toString();
             buffer = ByteBuffer.wrap(spanContext.getSpanIdBytes());
             long spanId = buffer.getLong();
-            return new SpanId(traceId, spanId, spanId);
+            return new SpanId(traceId, spanId, spanId,
+                    spanContext.isRemote(),
+                    spanContext.getTraceFlags(),
+                    spanContext.getTraceState());
         } else {
             return INVALID_SPAN_ID;
         }
+    }
+
+    /**
+     * Creates a span ID that was propagated from a remote parent.
+     */
+    public static SpanId fromRemote(String traceId) {
+        long spanId = rand.nextLong();
+        return fromRemote(traceId, spanId, spanId);
+    }
+
+    /**
+     * Creates a span ID that was propagated from a remote parent.
+     */
+    public static SpanId fromRemote(String traceId, byte traceFlags, TraceState traceState) {
+        long spanId = rand.nextLong();
+        return new SpanId(traceId, spanId, spanId, true, traceFlags, traceState);
+    }
+
+    /**
+     * Creates a span ID that was propagated from a remote parent.
+     */
+    public static SpanId fromRemote(String traceId, long parentId) {
+        return fromRemote(traceId, parentId, TraceFlags.getSampled(), TraceState.getDefault());
+    }
+
+    /**
+     * Creates a span ID that was propagated from a remote parent.
+     */
+    public static SpanId fromRemote(String traceId, long parentId, byte traceFlags, TraceState traceState) {
+        return new SpanId(traceId, parentId, rand.nextLong(), true, traceFlags, traceState);
+    }
+
+    /**
+     * Creates a span ID that was propagated from a remote parent.
+     */
+    public static SpanId fromRemote(String traceId, long parentId, long spanId) {
+        return fromRemote(traceId, parentId, spanId, TraceFlags.getSampled(), TraceState.getDefault());
+    }
+
+    /**
+     * Creates a span ID that was propagated from a remote parent.
+     */
+    public static SpanId fromRemote(String traceId, long parentId, long spanId, byte traceFlags, TraceState traceState) {
+        return new SpanId(traceId, parentId, spanId, true, traceFlags, traceState);
     }
 
     /**
