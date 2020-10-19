@@ -245,8 +245,8 @@ public final class SpanId {
             byte traceFlags = spanContext.getTraceFlags();
             boolean sampled = (traceFlags & SAMPLED) == SAMPLED;
             return new SpanId(traceId, spanId, spanId,
-                    spanContext.isRemote(),
                     sampled,
+                    spanContext.isRemote(),
                     spanContext.getTraceState());
         } else {
             return INVALID_SPAN_ID;
